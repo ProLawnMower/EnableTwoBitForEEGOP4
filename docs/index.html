@@ -168,8 +168,16 @@ async function finishConnect() {
           try { await webusb.device.open(); await webusb.device.reset(); } catch (e4) {}
         }
         try { await webusb.device.close(); } catch (e3) {}
-        await webusb.device.open();
-        log("端口已重置, 重试连接");
+        log("端口已重置, 重新获取设备句柄…");
+        // 端口重置后设备会重新枚举, 旧句柄失效; 从 getDevices() 取新实例
+        await new Promise(r => setTimeout(r, 1500));
+        const devs = await navigator.usb.getDevices();
+        const fresh = devs.find(d => (d.configurations || []).some(c => (c.interfaces || []).some(
+          i => i.alternates[0] && i.alternates[0].interfaceClass === 255 && i.alternates[0].interfaceSubclass === 66)));
+        if (!fresh) throw new Error("重置后未发现设备, 请拔插 USB 线");
+        await fresh.open();
+        webusb = new Adb.WebUSB.Transport(fresh);
+        log("已获取新句柄, 重试连接");
         adb = null;
         adb = await webusb.connectAdb("host::", () => {
           log("请在阅读器屏幕上确认「允许 USB 调试」");
