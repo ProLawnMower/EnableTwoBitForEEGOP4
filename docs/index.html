@@ -124,7 +124,8 @@ async function connect() {
       const prev = devices.find(d => (d.configurations||[]).some(c => (c.interfaces||[]).some(
         i => i.alternates[0] && i.alternates[0].interfaceClass === 255 && i.alternates[0].interfaceSubclass === 66)));
       if (prev) {
-        webusb = new Adb.WebUSBDevice(prev);
+        await prev.open();
+        webusb = new Adb.WebUSB.Transport(prev);
         log("使用已记住的设备: " + (prev.productName || "Android 设备") + "（免选择器）");
         return await finishConnect();
       }
