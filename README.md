@@ -80,6 +80,39 @@ adb shell "getprop sys.eink.mode; getprop sys.eink.dither; getprop sys.eink.dith
 
 **恢复出厂状态：** 重启设备，或执行锐利档命令。
 
+### AI Agent 调试指引（在线版 WebUSB）
+
+> 在线版页面的调试方法，供 AI 代理复现问题 / 验证修复。实测环境：macOS + Chrome 系浏览器（含 ZCode 内置浏览器，具备 WebUSB）。
+
+**前置纪律（最重要）：**
+
+- 测网页前必须 `adb kill-server`——系统 adb server 会抢占 USB interface（导致 `claimInterface` 失败），且 macOS 上它会被反复拉起，杀掉后的干净窗口通常只有 1–3 分钟，动作要快。
+- `requestDevice()` 需要真实用户手势，DOM 派发的 `click()` 无法弹出选择器。自动化测试一律走 `navigator.usb.getDevices()` 已授权设备快路径。
+- 首次连接设备屏幕会弹「允许 USB 调试」，需物理点击，自动化只能轮询页面日志等待；可用 `adb shell uiautomator dump` 确认屏幕状态。
+
+**页面缓存坑：** GitHub Pages CDN `max-age=600` 且对带查询参数的 URL 缓存不稳定。调试时导航到**显式路径** `.../EnableTwoBitForEEGOP4/index.html?v=<时间戳>`，并在页面里校验补丁已加载（`Adb.WebUSB.Transport.prototype.send.toString()` 应包含拆包逻辑），不要相信「刷新过了」。
+
+**传输层插桩：** 给页面要用的 USBDevice 实例包记录仪（`getDevices()` 每次返回同一对象，页面 connect 会复用你的包装）：
+
+```js
+const d = (await navigator.usb.getDevices()).find(x => x.productName === "P4");
+const orig = { out: d.transferOut.bind(d), in: d.transferIn.bind(d) };
+d.transferOut = (ep, data) => orig.out(ep, data)
+  .then(r => (window.__xfer ??= []).push(`OUT ep${ep} ${data.byteLength}B ${r.status}`), r)
+  .catch(e => ((window.__xfer ??= []).push(`OUT ep${ep} ✗`), Promise.reject(e)));
+// transferIn 同理；然后点连接，读 window.__xfer
+```
+
+**设备端证据（定位根因的关键）：**
+
+```bash
+adb shell "logcat -d -s adbd:V" | tail -40
+```
+
+两条特征签名：`received packet of unexpected length while reading header` = 合并发包问题（补丁 2）；连续的 `FUNCTIONFS_BIND` / `FUNCTIONFS_ENABLE` = `selectConfiguration` 触发端点重建（补丁 3）。设备端日志 + 主机端插桩对照，比单侧猜测快一个数量级。
+
+**状态污染与恢复：** 一次失败的传输会把 Chrome 侧管道状态毒化，且**页面刷新无效**（USB 句柄活在浏览器进程里）。恢复优先级：`adb kill-server` → 物理拔插 USB → `adb reboot`（本固件 `svc usb setFunctions` 无效）。读卡器端 adbd 挂死后任何电脑都连不上，重启即愈。
+
 ## 故障排查
 
 | 现象 | 处理 |
@@ -97,6 +130,8 @@ adb shell "getprop sys.eink.mode; getprop sys.eink.dither; getprop sys.eink.dith
 1. **屏蔽 `USBDevice.reset()`**：webadb.js 每次连接都会调 `USBDevice.reset()`，RK 的 USB gadget 被复位后会直接掉线且无法自恢复（必须物理重插）。
 2. **ADB 包拆分发送**：Chrome（尤其 macOS）在一次 `transferOut` 里同时发「24 字节 ADB 头 + 载荷」时，RK 端 adbd 的 FunctionFS 会读到异常长度（设备日志 `received packet of unexpected length while reading header`），连接被立即掐断。补丁把出站包拆成「头部」「载荷」两次传输，与 adbd 的读取节奏对齐。
 3. **跳过 `selectConfiguration` / `selectAlternateInterface`**：webadb.js 建连前的这两个标准请求会让 RK3326 的 configfs gadget 当场拆除重建 ADB 端点（adbd 日志可见 FUNCTIONFS_BIND/ENABLE 循环），之后所有传输一律报错。设备插上时本就是已配置状态，这两步纯属多余，补丁跳过只保留 `claimInterface`。
+
+完整分析（含设备端日志证据与可复现实验）：[docs/webadb-compatibility.md](docs/webadb-compatibility.md)。上游 [webadb/webadb.js](https://github.com/webadb/webadb.js) 已归档无法提 issue，此文档即为存档；若未来出现活跃 fork 可直接引用。
 
 ## 适用范围
 
