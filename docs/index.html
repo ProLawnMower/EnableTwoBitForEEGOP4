@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EEGO P4 显示模式一键切换</title>
+<script src="./webadb.js"></script>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    background: #f4f2ec; color: #111;
+    max-width: 640px; margin: 0 auto; padding: 24px 16px 64px;
+  }
+  h1 { font-size: 20px; border-bottom: 2px solid #111; padding-bottom: 8px; }
+  p.sub { color: #555; font-size: 13px; }
+  .card {
+    background: #fff; border: 1.5px solid #111; border-radius: 8px;
+    padding: 14px 16px; margin: 14px 0;
+    box-shadow: 3px 3px 0 #111;
+  }
+  .hint { font-size: 13px; color: #333; }
+  .hint ol { margin: 6px 0 0 18px; padding: 0; }
+  .hint li { margin: 3px 0; }
+  button {
+    font-family: inherit; font-size: 15px; font-weight: 600;
+    padding: 12px 16px; margin: 6px 6px 0 0;
+    border: 1.5px solid #111; border-radius: 6px;
+    background: #fff; color: #111; cursor: pointer;
+    box-shadow: 2px 2px 0 #111;
+    transition: transform .05s, box-shadow .05s;
+    min-width: 120px;
+  }
+  button:hover:not(:disabled) { background: #111; color: #fff; }
+  button:active:not(:disabled) { transform: translate(2px,2px); box-shadow: 0 0 0 #111; }
+  button:disabled { opacity: .35; cursor: not-allowed; }
+  button.primary { background: #111; color: #fff; }
+  button.primary:hover:not(:disabled) { background: #333; }
+  button.small { min-width: 0; padding: 8px 12px; font-size: 13px; font-weight: 400; }
+  #log {
+    background: #111; color: #c8f7c5; font-size: 12px;
+    border-radius: 6px; padding: 10px 12px; height: 180px;
+    overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+  }
+  .status { font-size: 14px; margin: 4px 0; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+         border: 1.5px solid #111; margin-right: 6px; vertical-align: -1px; }
+  .dot.on { background: #111; }
+  .modes button { display: block; width: 100%; text-align: left; margin: 8px 0; }
+  .modes button small { float: right; font-weight: 400; font-size: 12px; opacity: .8; }
+  footer { font-size: 12px; color: #777; margin-top: 28px; }
+  a { color: #111; }
+</style>
+</head>
+<body>
+<h1>EEGO P4 显示模式一键切换</h1>
+<p class="sub">通过浏览器 WebUSB 直连设备 ADB，无需安装任何软件 · 项目 <a href="https://github.com/ProLawnMower/EnableTwoBitForEEGOP4">EnableTwoBitForEEGOP4</a></p>
+
+<div class="card">
+  <div class="status"><span class="dot" id="dot"></span><span id="status">未连接</span></div>
+  <button class="primary" id="btn-connect">连接设备</button>
+  <button class="small" id="btn-disconnect" disabled>断开</button>
+  <span id="curmode" style="font-size:13px;color:#555;margin-left:8px;"></span>
+</div>
+
+<div class="card modes">
+  <div class="hint" style="margin-bottom:8px;">选择显示模式（切换后翻一页即可看到效果）：</div>
+  <button class="mode" data-mode="sharp" disabled>锐利 <small>出厂默认 · 最锐利文字 · 快刷不闪</small></button>
+  <button class="mode" data-mode="smooth" disabled>平滑 <small>文字边缘灰阶平滑 · 快刷不闪</small></button>
+  <button class="mode" data-mode="hd" disabled>超清 <small>真 2-bit 四级灰度 · 翻页全屏闪</small></button>
+</div>
+
+<div class="card">
+  <div class="hint"><b>首次使用</b></div>
+  <ol>
+    <li>点击「连接设备」，在弹出的设备选择器中选中你的阅读器（勾选"记住此设备"可跳过下次选择）</li>
+    <li>阅读器屏幕会弹出「允许 USB 调试吗？」——勾选「一律允许使用这台计算机进行调试」并点允许（浏览器密钥保存在本地，之后访问不再弹窗）</li>
+    <li>点任意模式按钮即完成切换</li>
+  </ol>
+  <p class="hint" style="margin-top:8px;color:#666;">要求：Chrome / Edge 浏览器（桌面版无需装 adb；也可用另一台安卓手机 + OTG 线的 Chrome 打开本页）。若电脑上 adb 正在占用设备，请先断开。</p>
+</div>
+
+<div class="card">
+  <div class="hint" style="margin-bottom:6px;"><b>日志</b></div>
+  <div id="log"></div>
+</div>
+
+<footer>原理：页面通过 WebUSB 与设备的 adbd 直接完成 ADB RSA 握手（webadb.js，密钥存于浏览器 IndexedDB），然后执行 setprop。仅设置系统属性，不触碰任何数据。</footer>
+
+<script>
+const MODES = {
+  sharp:  { label: "锐利", props: { "sys.eink.mode": "2", "sys.eink.dither": "1", "sys.eink.dither.var_thresh": "1000"   } },
+  smooth: { label: "平滑", props: { "sys.eink.mode": "2", "sys.eink.dither": "1", "sys.eink.dither.var_thresh": "100000" } },
+  hd:     { label: "超清", props: { "sys.eink.mode": "4", "sys.eink.dither": "1", "sys.eink.dither.var_thresh": "1000"   } },
+};
+
+let webusb = null, adb = null;
+
+const $ = id => document.getElementById(id);
+const log = (msg, err) => {
+  const el = $("log");
+  el.textContent += (err ? "✗ " : "") + msg + "\n";
+  el.scrollTop = el.scrollHeight;
+};
+
+function setStatus(text, on) {
+  $("status").textContent = text;
+  $("dot").className = "dot" + (on ? " on" : "");
+}
+
+function setConnected(on) {
+  $("btn-connect").disabled = on;
+  $("btn-disconnect").disabled = !on;
+  document.querySelectorAll(".mode").forEach(b => b.disabled = !on);
+}
+
+async function connect() {
+  try {
+    setConnected(false);
+    setStatus("选择设备…", false);
+    webusb = await Adb.open("WebUSB");
+    log("已选择设备: " + (webusb.device.productName || "Android 设备"));
+    setStatus("连接中（如设备弹出授权提示请在设备上确认）…", false);
+    adb = await webusb.connectAdb("host::", () => {
+      log("请在阅读器屏幕上确认「允许 USB 调试」（建议勾选一律允许）");
+    });
+    log("ADB 连接成功");
+    setStatus("已连接", true);
+    setConnected(true);
+    await readMode();
+  } catch (e) {
+    log("连接失败: " + (e.message || e), true);
+    log("排查: ① 设备选择器里选对设备了吗 ② 屏幕授权点了允许吗 ③ 电脑 adb 是否正占用设备（adb kill-server）");
+    setStatus("未连接", false);
+    adb = null;
+    setConnected(false);
+  }
+}
+
+async function runShell(cmd) {
+  const shell = await adb.shell(cmd);
+  const out = await shell.receive();
+  return new TextDecoder().decode(out.data).trim();
+}
+
+async function readMode() {
+  try {
+    const mode = await runShell("getprop sys.eink.mode");
+    const vt = await runShell("getprop sys.eink.dither.var_thresh");
+    const label = mode === "4" ? "超清" : (vt === "100000" ? "平滑" : (mode === "" || mode === "2" || mode === "0" ? "锐利" : "未知(mode=" + mode + ")"));
+    $("curmode").textContent = "当前: " + label + " (mode=" + (mode || "未设置") + ", var_thresh=" + (vt || "默认") + ")";
+    log("读取当前模式: " + label);
+  } catch (e) { log("读取模式失败: " + e.message, true); }
+}
+
+async function applyMode(name) {
+  const m = MODES[name];
+  if (!adb) return;
+  try {
+    let cmd = Object.entries(m.props).map(([k, v]) => `setprop ${k} ${v}`).join("; ");
+    cmd += "; echo BOBDFK_DONE";
+    log("执行: " + cmd);
+    const out = await runShell(cmd);
+    if (out.indexOf("BOBDFK_DONE") === -1) log("输出: " + out);
+    log("✓ 已切换到「" + m.label + "」，翻一页查看效果");
+    await readMode();
+  } catch (e) {
+    log("切换失败: " + (e.message || e), true);
+    log("连接可能已断开，请重新连接");
+    adb = null; setStatus("未连接", false); setConnected(false);
+  }
+}
+
+async function disconnect() {
+  try { if (webusb) await webusb.device.close(); } catch (e) {}
+  adb = null; webusb = null;
+  setStatus("未连接", false); setConnected(false);
+  $("curmode").textContent = "";
+  log("已断开");
+}
+
+$("btn-connect").onclick = connect;
+$("btn-disconnect").onclick = disconnect;
+document.querySelectorAll(".mode").forEach(b => b.onclick = () => applyMode(b.dataset.mode));
+log("页面就绪。点击「连接设备」开始。");
+</script>
+</body>
+</html>
