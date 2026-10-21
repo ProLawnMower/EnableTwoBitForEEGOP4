@@ -159,6 +159,28 @@ async function finishConnect() {
     setConnected(true);
     await readMode();
   } catch (e) {
+    // USB 传输层错误: 尝试端口级重置(专治 stall 的坏端点)后自动重试一次
+    if (/transfer/i.test(e.message || "") && webusb && webusb.device) {
+      try {
+        log("USB 传输错误, 执行端口重置后重试…");
+        try { await webusb.device.close(); } catch (e2) {}
+        await webusb.device.reset();
+        await webusb.device.open();
+        log("端口已重置, 重试连接");
+        adb = null;
+        adb = await webusb.connectAdb("host::", () => {
+          log("请在阅读器屏幕上确认「允许 USB 调试」");
+        });
+        log("ADB 连接成功 (重置后)");
+        setStatus("已连接", true);
+        setConnected(true);
+        await readMode();
+        return;
+      } catch (e3) {
+        log("重置重试仍失败: " + (e3.message || e3), true);
+        log("建议: 拔插一次 USB 线 (重新枚举设备)");
+      }
+    }
     log("连接失败: " + (e.message || e), true);
     if ((e.message||"").indexOf("claim") >= 0) {
       log("claimInterface 失败 = USB 接口被占用: 电脑上的 adb 服务正持有设备。终端执行 adb kill-server 后重试");
