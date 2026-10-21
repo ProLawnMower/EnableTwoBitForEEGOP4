@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>EEGO P4 显示模式一键切换</title>
 <script src="./webadb.js"></script>
+<script>
+// 关键补丁: webadb.js 的 Adb.WebUSB.Device 构造函数会调用 USBDevice.reset(),
+// 而本设备(EEGO P4/RK 方案)的 USB gadget 栈被 reset 后会直接掉线不自恢复,
+// 导致每次连接都在首包 transferOut 失败。屏蔽该内建 reset。
+if (window.Adb && Adb.WebUSB && Adb.WebUSB.Transport) {
+  Adb.WebUSB.Transport.prototype.reset = function() {};
+}
+</script>
 <style>
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
