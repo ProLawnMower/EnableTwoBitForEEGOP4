@@ -6,11 +6,29 @@
 <title>EEGO P4 显示模式一键切换</title>
 <script src="./webadb.js"></script>
 <script>
-// 关键补丁: webadb.js 的 Adb.WebUSB.Device 构造函数会调用 USBDevice.reset(),
+// 补丁 1: webadb.js 的 Adb.WebUSB.Device 构造函数会调用 USBDevice.reset(),
 // 而本设备(EEGO P4/RK 方案)的 USB gadget 栈被 reset 后会直接掉线不自恢复,
 // 导致每次连接都在首包 transferOut 失败。屏蔽该内建 reset。
+//
+// 补丁 2 (核心修复): Chrome/macOS 的 WebUSB 在一次 transferOut 中发送
+// 「24字节ADB头 + 载荷」时, RK 平台 adbd 的 FunctionFS 读到的包长度异常,
+// 设备端日志报 "received packet of unexpected length while reading header",
+// 表现为网页端 transferOut/transferIn 报 "A transfer error has occurred"。
+// 线缆 adb 正常是因为其读循环与 ffs 对齐方式不同。
+// 解法: 所有超过 24 字节的出站包, 拆成「头部」+「载荷」两次 transferOut,
+// 与 adbd 的「读24字节头 → 读载荷」节奏完全对齐。实测可正常完成 ADB 握手。
 if (window.Adb && Adb.WebUSB && Adb.WebUSB.Transport) {
   Adb.WebUSB.Transport.prototype.reset = function() {};
+  Adb.WebUSB.Transport.prototype.send = function(ep, data) {
+    const dv = data instanceof DataView ? data : new DataView(data.buffer !== undefined ? data.buffer : data);
+    const len = dv.byteLength;
+    if (len > 24) {
+      const head = dv.buffer.slice(dv.byteOffset, dv.byteOffset + 24);
+      const body = dv.buffer.slice(dv.byteOffset + 24, dv.byteOffset + len);
+      return this.device.transferOut(ep, head).then(() => this.device.transferOut(ep, body));
+    }
+    return this.device.transferOut(ep, data);
+  };
 }
 </script>
 <style>
