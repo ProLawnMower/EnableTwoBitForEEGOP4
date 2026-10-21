@@ -6,6 +6,8 @@ EEGO P4（及同方案墨水屏阅读器）**显示模式一键切换工具**—
 
 ## 三种显示模式
 
+![SharpSmoothHD](20261021-201252.jpeg)
+
 | 模式 | 参数 | 效果 |
 |---|---|---|
 | **锐利** `sharp` | `sys.eink.mode=2` `sys.eink.dither=1` `sys.eink.dither.var_thresh=1000` | 出厂默认。文字纯黑白硬阈值最锐利，快刷不闪，图片为系统网点抖动 |
