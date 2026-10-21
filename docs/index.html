@@ -30,6 +30,21 @@ if (window.Adb && Adb.WebUSB && Adb.WebUSB.Transport) {
     return this.device.transferOut(ep, data);
   };
 }
+// 补丁 3 (真·根因): webadb.js 的 getDevice() 在 claim 接口前会执行
+// selectConfiguration() + selectAlternateInterface()。RK3326 的 configfs gadget
+// 在会话中途收到这两个标准请求会拆除并重建 FunctionFS 端点(adbd 日志可见
+// FUNCTIONFS_BIND/ENABLE 循环), Chrome 侧管道随即失效, 之后所有
+// transferOut/transferIn 一律报 "A transfer error"。
+// 设备插上时本来就是已配置状态(configuration != null), selectAlternateInterface
+// 对 FunctionFS alt=0 无意义, 全部跳过, 只保留 claim。
+if (window.Adb && Adb.WebUSB && Adb.WebUSB.Transport) {
+  Adb.WebUSB.Transport.prototype.getDevice = function(filter) {
+    const match = this.find(filter);
+    if (!match)
+      return Promise.reject(new Error("ADB interface not found"));
+    return this.device.claimInterface(match.intf.interfaceNumber).then(() => match);
+  };
+}
 </script>
 <style>
   :root { color-scheme: light; }
