@@ -118,9 +118,36 @@ function setConnected(on) {
 async function connect() {
   try {
     setConnected(false);
+    // 快速路径: 使用浏览器已记住授权的设备(免选择器弹窗)
+    try {
+      const devices = await navigator.usb.getDevices();
+      const prev = devices.find(d => (d.configurations||[]).some(c => (c.interfaces||[]).some(
+        i => i.alternates[0] && i.alternates[0].interfaceClass === 255 && i.alternates[0].interfaceSubclass === 66)));
+      if (prev) {
+        webusb = new Adb.WebUSBDevice(prev);
+        log("使用已记住的设备: " + (prev.productName || "Android 设备") + "（免选择器）");
+        return await finishConnect();
+      }
+    } catch (e) { /* 忽略, 走正常选择器流程 */ }
     setStatus("选择设备…", false);
     webusb = await Adb.open("WebUSB");
     log("已选择设备: " + (webusb.device.productName || "Android 设备"));
+    return await finishConnect();
+  } catch (e) {
+    log("连接失败: " + (e.message || e), true);
+    if ((e.message||"").indexOf("claim") >= 0) {
+      log("claimInterface 失败 = USB 接口被占用: 电脑上的 adb 服务正持有设备。终端执行 adb kill-server 后重试; 或检查其他占用 ADB 的程序");
+    } else {
+      log("排查: ① 设备选择器里选对设备了吗 ② 屏幕授权点了允许吗 ③ 电脑 adb 是否正占用设备（adb kill-server）");
+    }
+    setStatus("未连接", false);
+    adb = null;
+    setConnected(false);
+  }
+}
+
+async function finishConnect() {
+  try {
     setStatus("连接中（如设备弹出授权提示请在设备上确认）…", false);
     adb = await webusb.connectAdb("host::", () => {
       log("请在阅读器屏幕上确认「允许 USB 调试」（建议勾选一律允许）");
@@ -131,10 +158,15 @@ async function connect() {
     await readMode();
   } catch (e) {
     log("连接失败: " + (e.message || e), true);
-    log("排查: ① 设备选择器里选对设备了吗 ② 屏幕授权点了允许吗 ③ 电脑 adb 是否正占用设备（adb kill-server）");
+    if ((e.message||"").indexOf("claim") >= 0) {
+      log("claimInterface 失败 = USB 接口被占用: 电脑上的 adb 服务正持有设备。终端执行 adb kill-server 后重试");
+    } else {
+      log("排查: ① 设备选择器选对了吗 ② 设备屏幕授权点了允许吗 ③ adb kill-server 后重试");
+    }
     setStatus("未连接", false);
     adb = null;
     setConnected(false);
+    throw e;
   }
 }
 
