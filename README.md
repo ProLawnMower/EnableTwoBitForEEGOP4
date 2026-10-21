@@ -85,9 +85,17 @@ adb shell "getprop sys.eink.mode; getprop sys.eink.dither; getprop sys.eink.dith
 | 现象 | 处理 |
 |---|---|
 | 在线版连不上 | 电脑 adb 是否正占用设备（`adb kill-server`）；换 Chrome/Edge；重新插拔 USB |
+| 在线版报 `transferOut/transferIn: A transfer error` | 先 `adb kill-server`；仍不行就**拔插一次 USB 线**（本页已内置两项兼容补丁，见下方说明，一般不会再出现） |
 | 设备不弹授权框 | 开发者选项里「撤销 USB 调试授权」后重试 |
 | 切换后屏幕没变 | 属性是随下一次刷新生效——翻一页或唤醒屏幕 |
 | 脚本报 adb 不存在 | macOS: `brew install android-platform-tools`；Windows: 装 platform-tools 并配 PATH |
+
+### 在线版的两项 webadb.js 兼容补丁（页面已内置，无需操作）
+
+实测 RK3326 方案的 USB 栈与 webadb.js 原版有两处不兼容，页面加载时自动打了补丁：
+
+1. **屏蔽 `USBDevice.reset()`**：webadb.js 每次连接都会调 `USBDevice.reset()`，RK 的 USB gadget 被复位后会直接掉线且无法自恢复（必须物理重插）。
+2. **ADB 包拆分发送**：Chrome（尤其 macOS）在一次 `transferOut` 里同时发「24 字节 ADB 头 + 载荷」时，RK 端 adbd 的 FunctionFS 会读到异常长度（设备日志 `received packet of unexpected length while reading header`），连接被立即掐断。补丁把出站包拆成「头部」「载荷」两次传输，与 adbd 的读取节奏对齐。
 
 ## 适用范围
 
