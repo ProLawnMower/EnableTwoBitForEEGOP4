@@ -1,6 +1,6 @@
 # EnableTwoBitForEEGOP4
 
-EEGO P4（及同方案墨水屏阅读器）**显示模式一键切换工具**——三种模式，三种文件形态任选：桌面脚本 / ADB 命令 / 纯浏览器在线版（WebUSB）。
+EEGO P4（及同方案墨水屏阅读器）**显示模式一键切换工具**——三种模式，桌面脚本 / ADB 命令任选。
 
 通过设置三个系统属性实现切换，**仅运行时生效、不修改任何系统文件、重启即恢复出厂**，零风险。
 
@@ -14,19 +14,9 @@ EEGO P4（及同方案墨水屏阅读器）**显示模式一键切换工具**—
 
 > 属性实时生效，屏幕会随下一次刷新切换；`sys.*` 属性重启后自动回到出厂默认（锐利）。
 
-## 在线版（推荐）：无需安装任何东西
+## 在线版（调试中，暂未开放）
 
-**[→ 打开在线切换器](https://prolawnmower.github.io/EnableTwoBitForEEGOP4/)**
-
-用 **Chrome 或 Edge** 打开上面的页面，USB 连接阅读器：
-
-1. 点「连接设备」→ 浏览器弹出的选择器里选中阅读器
-2. 阅读器屏幕上会弹「允许 USB 调试吗？」——**勾选「一律允许」**再点允许（浏览器生成的密钥保存在本机 IndexedDB，之后访问不再弹窗）
-3. 点任意模式按钮即完成
-
-原理：页面通过 **WebUSB** 直接与设备的 adbd 完成 ADB 协议握手（含 RSA 配对，基于 [webadb.js](https://github.com/webadb/webadb.js)），然后下发 `setprop`——等价于浏览器里跑了一遍 adb shell，全程不经过任何服务器。也支持用另一台安卓手机 + OTG 线的 Chrome 打开，手机即电脑。
-
-限制：Chrome/Edge 专用（Firefox/Safari 无 WebUSB）；若电脑上的 adb 程序正占用设备需先退出（或 `adb kill-server`）。
+基于 WebUSB 的纯浏览器切换器正在开发调试中，功能尚未完全验证，修好后会上线并在此公布入口。页面代码已随仓库部署在 GitHub Pages，仅供调试。
 
 ## 桌面脚本版
 
@@ -85,17 +75,18 @@ adb shell "getprop sys.eink.mode; getprop sys.eink.dither; getprop sys.eink.dith
 | 现象 | 处理 |
 |---|---|
 | 在线版连不上 | 电脑 adb 是否正占用设备（`adb kill-server`）；换 Chrome/Edge；重新插拔 USB |
-| 在线版报 `transferOut/transferIn: A transfer error` | 先 `adb kill-server`；仍不行就**拔插一次 USB 线**（本页已内置两项兼容补丁，见下方说明，一般不会再出现） |
+| 在线版报 `transferOut/transferIn: A transfer error` | 先 `adb kill-server`；仍不行就**拔插一次 USB 线**（本页已内置多项兼容补丁，见下方说明） |
 | 设备不弹授权框 | 开发者选项里「撤销 USB 调试授权」后重试 |
 | 切换后屏幕没变 | 属性是随下一次刷新生效——翻一页或唤醒屏幕 |
 | 脚本报 adb 不存在 | macOS: `brew install android-platform-tools`；Windows: 装 platform-tools 并配 PATH |
 
-### 在线版的两项 webadb.js 兼容补丁（页面已内置，无需操作）
+### 在线版的 webadb.js 兼容补丁（页面已内置，无需操作）
 
-实测 RK3326 方案的 USB 栈与 webadb.js 原版有两处不兼容，页面加载时自动打了补丁：
+实测 RK3326 方案的 USB 栈与 webadb.js 原版有多处不兼容，页面加载时自动打了补丁：
 
 1. **屏蔽 `USBDevice.reset()`**：webadb.js 每次连接都会调 `USBDevice.reset()`，RK 的 USB gadget 被复位后会直接掉线且无法自恢复（必须物理重插）。
 2. **ADB 包拆分发送**：Chrome（尤其 macOS）在一次 `transferOut` 里同时发「24 字节 ADB 头 + 载荷」时，RK 端 adbd 的 FunctionFS 会读到异常长度（设备日志 `received packet of unexpected length while reading header`），连接被立即掐断。补丁把出站包拆成「头部」「载荷」两次传输，与 adbd 的读取节奏对齐。
+3. **跳过 `selectConfiguration` / `selectAlternateInterface`**：webadb.js 建连前的这两个标准请求会让 RK3326 的 configfs gadget 当场拆除重建 ADB 端点（adbd 日志可见 FUNCTIONFS_BIND/ENABLE 循环），之后所有传输一律报错。设备插上时本就是已配置状态，这两步纯属多余，补丁跳过只保留 `claimInterface`。
 
 ## 适用范围
 
