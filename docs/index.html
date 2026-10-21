@@ -163,8 +163,11 @@ async function finishConnect() {
     if (/transfer/i.test(e.message || "") && webusb && webusb.device) {
       try {
         log("USB 传输错误, 执行端口重置后重试…");
-        try { await webusb.device.close(); } catch (e2) {}
-        await webusb.device.reset();
+        // reset() 要求设备处于打开状态; 端口重置会清空所有 claim/配置
+        try { await webusb.device.reset(); } catch (e2) {
+          try { await webusb.device.open(); await webusb.device.reset(); } catch (e4) {}
+        }
+        try { await webusb.device.close(); } catch (e3) {}
         await webusb.device.open();
         log("端口已重置, 重试连接");
         adb = null;
