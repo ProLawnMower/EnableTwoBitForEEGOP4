@@ -159,38 +159,11 @@ async function finishConnect() {
     setConnected(true);
     await readMode();
   } catch (e) {
-    // USB 传输层错误: 尝试端口级重置(专治 stall 的坏端点)后自动重试一次
-    if (/transfer/i.test(e.message || "") && webusb && webusb.device) {
-      try {
-        log("USB 传输错误, 执行端口重置后重试…");
-        // reset() 要求设备处于打开状态; 端口重置会清空所有 claim/配置
-        try { await webusb.device.reset(); } catch (e2) {
-          try { await webusb.device.open(); await webusb.device.reset(); } catch (e4) {}
-        }
-        try { await webusb.device.close(); } catch (e3) {}
-        log("端口已重置, 重新获取设备句柄…");
-        // 端口重置后设备会重新枚举, 旧句柄失效; 从 getDevices() 取新实例
-        await new Promise(r => setTimeout(r, 1500));
-        const devs = await navigator.usb.getDevices();
-        const fresh = devs.find(d => (d.configurations || []).some(c => (c.interfaces || []).some(
-          i => i.alternates[0] && i.alternates[0].interfaceClass === 255 && i.alternates[0].interfaceSubclass === 66)));
-        if (!fresh) throw new Error("重置后未发现设备, 请拔插 USB 线");
-        await fresh.open();
-        webusb = new Adb.WebUSB.Transport(fresh);
-        log("已获取新句柄, 重试连接");
-        adb = null;
-        adb = await webusb.connectAdb("host::", () => {
-          log("请在阅读器屏幕上确认「允许 USB 调试」");
-        });
-        log("ADB 连接成功 (重置后)");
-        setStatus("已连接", true);
-        setConnected(true);
-        await readMode();
-        return;
-      } catch (e3) {
-        log("重置重试仍失败: " + (e3.message || e3), true);
-        log("建议: 拔插一次 USB 线 (重新枚举设备)");
-      }
+    // USB 传输层错误: 设备端 adbd 端点 stall。
+    // 注意: 实测 USBDevice.reset() 会让该设备从总线掉线且不自恢复, 因此不做自动重置,
+    // 只引导用户拔插 USB 线(重新枚举 = 最可靠的端点复位)。
+    if (/transfer/i.test(e.message || "")) {
+      log("USB 传输错误(设备端 adbd 端点阻塞)。请【拔插一次 USB 线】, 等待 3 秒后重新点「连接设备」");
     }
     log("连接失败: " + (e.message || e), true);
     if ((e.message||"").indexOf("claim") >= 0) {
